@@ -8,7 +8,7 @@
  * IMPORTANT: Bump CACHE_VERSION on every deploy that changes static files.
  */
 
-const CACHE_VERSION   = 'dormbook-v3.0';
+const CACHE_VERSION   = 'dormbook-v3.1';
 const STATIC_CACHE    = `${CACHE_VERSION}-static`;
 const API_CACHE       = `${CACHE_VERSION}-api`;
 const SYNC_QUEUE_KEY  = 'dormbook-sync-queue';
