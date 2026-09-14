@@ -337,33 +337,126 @@ async function renderDashboard(el) {
   `;
 }
 
-// ── Beds ──────────────────────────────────────────────────────
+// ── Beds — Floor Map ──────────────────────────────────────────
 async function renderBeds(el) {
-  const beds = await api('GET', '/beds');
-  const ha   = document.getElementById('header-actions');
-  if (['owner','manager'].includes(STATE.user.role)) {
-    ha.innerHTML = `<button class="btn btn-primary btn-sm" id="add-bed-btn">+ Add Bed</button>`;
-    document.getElementById('add-bed-btn').onclick = () => showAddBedModal();
+  const floors = await api('GET', '/floors');
+  const ha = document.getElementById('header-actions');
+  const isOwnerMgr = ['owner','manager'].includes(STATE.user.role);
+
+  if (isOwnerMgr) {
+    ha.innerHTML = `
+      <button class="btn btn-outline btn-sm" onclick="showAddFloorModal()">+ Floor</button>
+      <button class="btn btn-outline btn-sm" onclick="showAddRoomModal()">+ Room</button>
+      <button class="btn btn-primary btn-sm" onclick="showAddBedModal()">+ Bed</button>
+    `;
   }
-  const statusCounts = {};
-  beds.forEach(b => { statusCounts[b.status] = (statusCounts[b.status]||0)+1; });
+
+  if (!floors.length) {
+    el.innerHTML = `<div class="empty-state"><div class="empty-icon">🏗️</div><p>No floors yet. Add a floor to get started.</p></div>`;
+    return;
+  }
+
+  // Count totals
+  let totalBeds = 0, totalOccupied = 0, totalAvail = 0;
+  floors.forEach(f => f.rooms.forEach(rm => {
+    totalBeds += rm.total_beds;
+    totalOccupied += rm.occupied;
+    totalAvail += rm.beds.filter(b => b.status === 'available').length;
+  }));
+
   el.innerHTML = `
     <div class="stat-grid mb-20">
-      ${Object.entries(statusCounts).map(([s,c]) => `
-        <div class="stat-card"><div class="stat-label">${s}</div><div class="stat-value">${c}</div></div>
-      `).join('')}
+      <div class="stat-card"><div class="stat-label">Total Beds</div><div class="stat-value">${totalBeds}</div></div>
+      <div class="stat-card accent"><div class="stat-label">Occupied</div><div class="stat-value">${totalOccupied}</div></div>
+      <div class="stat-card success"><div class="stat-label">Available</div><div class="stat-value">${totalAvail}</div></div>
     </div>
-    <div class="bed-grid">
-      ${beds.map(b => `
-        <div class="bed-card ${b.status}" onclick="showBedDetail('${b.id}')">
-          <div class="bed-label">${b.bed_label}</div>
-          <div class="bed-status">${b.room_number ? b.room_number+' · ' : ''}${b.status}</div>
-          ${b.resident_name ? `<div class="bed-resident">${b.resident_name}</div>` : ''}
-          ${b.monthly_rent_paise ? `<div class="bed-resident">${rupees(b.monthly_rent_paise)}/mo</div>` : (b.base_rate_paise ? `<div class="bed-resident" style="opacity:.6">${rupees(b.base_rate_paise)}/mo</div>` : '')}
-        </div>
-      `).join('')}
+    <div class="floor-tabs mb-12">
+      ${floors.map((f, i) => `<button class="btn ${i===0?'btn-primary':'btn-outline'} btn-sm" onclick="switchFloor(${i})" data-floor-idx="${i}">${f.label}</button>`).join(' ')}
     </div>
+    <div id="floor-content"></div>
   `;
+  window._floorData = floors;
+  switchFloor(0);
+}
+
+function switchFloor(idx) {
+  document.querySelectorAll('.floor-tabs button').forEach((b, i) => {
+    b.className = `btn ${i===idx?'btn-primary':'btn-outline'} btn-sm`;
+  });
+  const floor = window._floorData[idx];
+  if (!floor) return;
+  const fc = document.getElementById('floor-content');
+  const isOwner = STATE.user.role === 'owner';
+
+  fc.innerHTML = floor.rooms.length ? floor.rooms.map(rm => `
+    <div class="card mb-12">
+      <div class="flex-between mb-12">
+        <strong>Room ${rm.room_number} <span style="font-weight:normal;color:var(--gray-500);font-size:12px">${rm.room_type} · ${rm.occupied}/${rm.total_beds} occupied</span></strong>
+      </div>
+      <div class="bed-grid">
+        ${rm.beds.map(b => `
+          <div class="bed-card ${b.status}" onclick="showBedDetail('${b.id}')" style="cursor:pointer">
+            <div class="bed-label">${b.bed_label}</div>
+            <div class="bed-status">${b.status}</div>
+            ${b.resident_name ? `<div class="bed-resident">${b.resident_name}</div>` : ''}
+            <div class="bed-resident" style="opacity:.7">${b.daily_rate_paise ? rupees(b.daily_rate_paise)+'/day' : 'No rate set'}</div>
+          </div>
+        `).join('')}
+      </div>
+    </div>
+  `).join('') : `<div class="empty-state"><p>No rooms on this floor. Add a room first.</p></div>`;
+}
+
+function showAddFloorModal() {
+  openModal('Add Floor', `
+    <div class="field"><label>Floor Number *</label><input id="af-num" type="number" min="0" placeholder="0 = Ground" /></div>
+    <div class="field"><label>Label *</label><input id="af-label" placeholder="Ground Floor, 1st Floor..." /></div>
+    <div id="af-error" class="error-msg hidden"></div>
+    <div class="btn-group mt-12">
+      <button class="btn btn-primary" onclick="submitAddFloor()">Add Floor</button>
+      <button class="btn btn-outline" onclick="closeModal()">Cancel</button>
+    </div>
+  `);
+}
+async function submitAddFloor() {
+  const err = document.getElementById('af-error'); err.classList.add('hidden');
+  try {
+    await api('POST', '/floors', {
+      floor_number: parseInt(document.getElementById('af-num').value),
+      label: document.getElementById('af-label').value.trim(),
+    });
+    toast('Floor added', 'success'); closeModal(); renderPage('beds');
+  } catch(ex) { err.textContent = ex.message; err.classList.remove('hidden'); }
+}
+
+function showAddRoomModal() {
+  const floors = window._floorData || [];
+  const floorOpts = floors.map(f => `<option value="${f.id}">${f.label}</option>`).join('');
+  openModal('Add Room', `
+    <div class="field"><label>Floor *</label><select id="ar-floor">${floorOpts||'<option>No floors</option>'}</select></div>
+    <div class="field-row">
+      <div class="field"><label>Room Number *</label><input id="ar-num" placeholder="101, 102..." /></div>
+      <div class="field"><label>Type</label>
+        <select id="ar-type"><option value="shared">Shared</option><option value="private">Private</option><option value="dormitory">Dormitory</option></select>
+      </div>
+    </div>
+    <div id="ar-error" class="error-msg hidden"></div>
+    <div class="btn-group mt-12">
+      <button class="btn btn-primary" onclick="submitAddRoom()">Add Room</button>
+      <button class="btn btn-outline" onclick="closeModal()">Cancel</button>
+    </div>
+  `);
+}
+async function submitAddRoom() {
+  const err = document.getElementById('ar-error'); err.classList.add('hidden');
+  try {
+    await api('POST', '/rooms', {
+      floor_id: document.getElementById('ar-floor').value,
+      room_number: document.getElementById('ar-num').value.trim(),
+      room_type: document.getElementById('ar-type').value,
+    });
+    toast('Room added', 'success'); closeModal(); renderPage('beds');
+  } catch(ex) { err.textContent = ex.message; err.classList.remove('hidden'); }
 }
 
 async function showBedDetail(bedId) {
@@ -375,6 +468,7 @@ async function showBedDetail(bedId) {
       <div><div class="stat-label">Room</div><p>${b.room_number||'—'} ${b.floor_label||''}</p></div>
     </div>
     ${b.base_rate_paise ? `<div><div class="stat-label">Base Rate</div><p>${rupees(b.base_rate_paise)}/month</p></div>` : ''}
+    ${b.daily_rate_paise ? `<div><div class="stat-label">Daily Rate</div><p>${rupees(b.daily_rate_paise)}/day</p></div>` : ''}
     ${b.resident_name ? `
       <hr class="divider"/>
       <div><strong>${b.resident_name}</strong> · ${b.resident_mobile||''}</div>
@@ -403,9 +497,9 @@ async function showBedDetail(bedId) {
     ` : ''}
     ${isOwnerMgr ? `
       <hr class="divider"/>
-      <div class="section-title">Set Bed Rate</div>
+      <div class="section-title">Set Daily Rate</div>
       <div class="field-row">
-        <div class="field"><label>Monthly Rate (paise)</label><input id="br-rate" type="number" min="0" value="${b.base_rate_paise||0}" /></div>
+        <div class="field"><label>Daily Rate (paise)</label><input id="br-rate" type="number" min="0" value="${b.daily_rate_paise||0}" /></div>
         <div><button class="btn btn-outline btn-sm" style="margin-top:24px" onclick="saveBedRate('${bedId}')">Save Rate</button></div>
       </div>
     ` : ''}
@@ -424,8 +518,8 @@ function navigateCheckinForBed(bedId) {
 async function saveBedRate(bedId) {
   try {
     const rate = parseInt(document.getElementById('br-rate').value) || 0;
-    await api('PATCH', `/beds/${bedId}/rate`, { base_rate_paise: rate });
-    toast('Bed rate updated', 'success');
+    await api('PATCH', `/beds/${bedId}/rate`, { daily_rate_paise: rate });
+    toast(`Rate set to ${rupees(rate)}/day`, 'success');
     closeModal(); renderPage('beds');
   } catch(ex) { toast(ex.message, 'error'); }
 }
@@ -448,7 +542,7 @@ async function showAddBedModal() {
     <div class="field"><label>Room</label><select id="ab-room">${roomOptions}</select></div>
     <div class="field-row">
       <div class="field"><label>Bed Label *</label><input id="ab-label" placeholder="e.g. 101-D" /></div>
-      <div class="field"><label>Monthly Rate (paise)</label><input id="ab-rate" type="number" min="0" value="0" placeholder="500000" /></div>
+      <div class="field"><label>Daily Rate (paise)</label><input id="ab-rate" type="number" min="0" value="0" placeholder="50000 = ₹500/day" /></div>
     </div>
     <div class="btn-group mt-12">
       <button class="btn btn-primary" onclick="submitAddBed()">Add Bed</button>
@@ -462,7 +556,7 @@ async function submitAddBed() {
     await api('POST', '/beds', {
       room_id: document.getElementById('ab-room').value,
       bed_label: document.getElementById('ab-label').value,
-      base_rate_paise: parseInt(document.getElementById('ab-rate').value) || 0,
+      daily_rate_paise: parseInt(document.getElementById('ab-rate').value) || 0,
     });
     toast('Bed added', 'success'); closeModal(); renderPage('beds');
   } catch(ex) { toast(ex.message, 'error'); }
@@ -477,7 +571,7 @@ async function renderCheckin(el) {
   ]);
   const beds = [...avail, ...reserved];
   const bedOpts = beds.length
-    ? beds.map(b => `<option value="${b.id}" data-rate="${b.base_rate_paise||0}">${b.bed_label} (${b.room_number||''})${b.status==='reserved'?' [RESERVED]':''}${b.base_rate_paise?` — ${rupees(b.base_rate_paise)}/mo`:''}</option>`).join('')
+    ? beds.map(b => `<option value="${b.id}">${b.bed_label} (${b.room_number||''})${b.status==='reserved'?' [RESERVED]':''}${b.daily_rate_paise?` — ${rupees(b.daily_rate_paise)}/day`:''}</option>`).join('')
     : '<option value="">No available beds</option>';
 
   el.innerHTML = `
@@ -516,9 +610,14 @@ async function renderCheckin(el) {
         </div>
 
         <div class="section-title">Financial Details (in Paise)</div>
-        <div class="field-note mb-12">Enter amounts in paise (₹1 = 100 paise). Example: ₹5,000 = 500000. Rent auto-fills from bed rate if set.</div>
+        <div class="field-note mb-12">Enter amounts in paise (₹1 = 100 paise). Example: ₹500 = 50000. Rate auto-fills from bed price.</div>
         <div class="field-row">
-          <div class="field"><label>Monthly Rent (paise) *</label><input id="ci-rent" type="number" min="0" required placeholder="500000" /></div>
+          <div class="field"><label>Rate Type *</label>
+            <select id="ci-rate-type" onchange="updateRateFromType()">
+              <option value="daily">Per Day</option><option value="weekly">Per Week</option><option value="monthly">Per Month</option>
+            </select>
+          </div>
+          <div class="field"><label>Rate (paise) *</label><input id="ci-rent" type="number" min="0" required placeholder="50000" /></div>
           <div class="field"><label>Deposit (paise)</label><input id="ci-deposit" type="number" min="0" placeholder="1000000" /></div>
         </div>
         <div class="field-row">
@@ -547,17 +646,38 @@ async function renderCheckin(el) {
       </form>
     </div>
   `;
-  // Auto-fill rent from bed base rate when bed selection changes
+  // Auto-fill rate from bed daily rate when bed selection or rate_type changes
   const bedSelect = document.getElementById('ci-bed');
   const rentInput = document.getElementById('ci-rent');
-  if (bedSelect && rentInput) {
+  const rateTypeSelect = document.getElementById('ci-rate-type');
+  window._bedRates = {}; // store daily rates per bed
+  if (bedSelect) {
+    // Build rate lookup from bed options
+    beds.forEach(b => { window._bedRates[b.id] = b.daily_rate_paise || 0; });
     function fillRate() {
-      const opt = bedSelect.options[bedSelect.selectedIndex];
-      const rate = parseInt(opt?.dataset?.rate || 0);
-      if (rate > 0 && !rentInput.value) rentInput.value = rate;
+      const bedId = bedSelect.value;
+      const daily = window._bedRates[bedId] || 0;
+      const rateType = rateTypeSelect ? rateTypeSelect.value : 'daily';
+      if (daily > 0) {
+        if (rateType === 'daily') rentInput.value = daily;
+        else if (rateType === 'weekly') rentInput.value = daily * 7;
+        else rentInput.value = daily * 30;
+      }
     }
-    bedSelect.addEventListener('change', () => { rentInput.value = ''; fillRate(); });
-    fillRate(); // fill on initial load
+    bedSelect.addEventListener('change', fillRate);
+    fillRate();
+  }
+}
+
+function updateRateFromType() {
+  const bedId = document.getElementById('ci-bed')?.value;
+  const daily = (window._bedRates && window._bedRates[bedId]) || 0;
+  const rateType = document.getElementById('ci-rate-type')?.value || 'daily';
+  const rentInput = document.getElementById('ci-rent');
+  if (daily > 0 && rentInput) {
+    if (rateType === 'daily') rentInput.value = daily;
+    else if (rateType === 'weekly') rentInput.value = daily * 7;
+    else rentInput.value = daily * 30;
   }
 }
 
@@ -583,6 +703,8 @@ async function submitCheckin() {
       check_in_date:          document.getElementById('ci-checkin').value,
       expected_checkout:      document.getElementById('ci-checkout').value,
       monthly_rent_paise:     parseInt(document.getElementById('ci-rent').value) || 0,
+      rate_type:              document.getElementById('ci-rate-type').value,
+      rate_paise:             parseInt(document.getElementById('ci-rent').value) || 0,
       deposit_paise:          parseInt(document.getElementById('ci-deposit').value) || 0,
       amount_paid_paise:      parseInt(document.getElementById('ci-advance').value) || 0,
       payment_mode:           document.getElementById('ci-mode').value,
