@@ -1,0 +1,13 @@
+[phases.setup]
+nixPkgs = ["nodejs_22", "python3", "gcc", "gnumake"]
+
+[phases.install]
+cmds = ["npm ci"]
+
+[phases.build]
+cmds = [
+  "cd node_modules/better-sqlite3 && npx node-gyp rebuild --nodedir=/usr/include/node 2>/dev/null || echo '[BUILD] better-sqlite3 prebuilt binary will be used'"
+]
+
+[start]
+cmd = "node src/server.js"
