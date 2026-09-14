@@ -577,6 +577,7 @@ async function renderCheckin(el) {
   el.innerHTML = `
     <div class="card">
       <form id="checkin-form" onsubmit="return false">
+        <div id="ci-error" class="error-msg hidden" style="margin-bottom:16px;font-size:14px;padding:12px;border-radius:8px"></div>
         <div class="section-title">Personal Details</div>
         <div class="field-row">
           <div class="field"><label>Full Name *</label><input id="ci-name" required /></div>
@@ -638,7 +639,6 @@ async function renderCheckin(el) {
           </label>
         </div>
 
-        <div id="ci-error" class="error-msg hidden"></div>
         <div class="btn-group mt-12">
           <button type="submit" id="ci-submit" class="btn btn-primary" onclick="submitCheckin()">✅ Complete Check-In</button>
           <button type="button" class="btn btn-outline" onclick="navigate('residents')">Cancel</button>
@@ -715,8 +715,9 @@ async function submitCheckin() {
     toast(`${data.full_name} checked in successfully!`, 'success');
     navigate('residents');
   } catch(ex) {
-    err.textContent = ex.message;
+    err.textContent = '❌ Check-in failed: ' + (ex.message || 'Unknown error. Check console (F12).');
     err.classList.remove('hidden');
+    err.scrollIntoView({ behavior: 'smooth', block: 'start' });
     btn.disabled = false;
     btn.textContent = '✅ Complete Check-In';
   }
