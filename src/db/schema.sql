@@ -72,6 +72,7 @@ CREATE TABLE IF NOT EXISTS beds (
   property_id         TEXT NOT NULL,
   bed_label           TEXT NOT NULL,
   base_rate_paise     INTEGER NOT NULL DEFAULT 0,
+  daily_rate_paise    INTEGER NOT NULL DEFAULT 0,
   status              TEXT NOT NULL DEFAULT 'available'
                         CHECK (status IN ('available','occupied','reserved','cleaning','pending')),
   cleaning_started_at TEXT,
@@ -108,6 +109,9 @@ CREATE TABLE IF NOT EXISTS residents (
   status                   TEXT NOT NULL DEFAULT 'active'
                              CHECK (status IN ('active','checked_out')),
   monthly_rent_paise       INTEGER NOT NULL DEFAULT 0,
+  rate_type                TEXT    NOT NULL DEFAULT 'daily'
+                             CHECK (rate_type IN ('daily','weekly','monthly')),
+  rate_paise               INTEGER NOT NULL DEFAULT 0,
   deposit_paise            INTEGER NOT NULL DEFAULT 0,
   notes                    TEXT,
   checkin_by               TEXT NOT NULL,
