@@ -9,6 +9,21 @@ const { scheduleWhatsApp } = require('../services/whatsappService');
 function paise(val) { return Math.round(parseFloat(val || 0)); }
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
+// Ensure new columns exist before first use — runs once, idempotent
+let _migrated = false;
+function ensureColumns(db) {
+  if (_migrated) return;
+  try {
+    const cols = db.prepare("SELECT name FROM pragma_table_info('residents')").all().map(c => c.name);
+    if (!cols.includes('rate_type')) db.exec("ALTER TABLE residents ADD COLUMN rate_type TEXT NOT NULL DEFAULT 'daily'");
+    if (!cols.includes('rate_paise')) db.exec("ALTER TABLE residents ADD COLUMN rate_paise INTEGER NOT NULL DEFAULT 0");
+    const bedCols = db.prepare("SELECT name FROM pragma_table_info('beds')").all().map(c => c.name);
+    if (!bedCols.includes('daily_rate_paise')) db.exec("ALTER TABLE beds ADD COLUMN daily_rate_paise INTEGER NOT NULL DEFAULT 0");
+    if (!bedCols.includes('base_rate_paise')) db.exec("ALTER TABLE beds ADD COLUMN base_rate_paise INTEGER NOT NULL DEFAULT 0");
+  } catch(e) { console.warn('[MIGRATION] Column check:', e.message); }
+  _migrated = true;
+}
+
 /**
  * POST /api/v1/residents — Simplified check-in
  *
@@ -17,6 +32,7 @@ const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
  */
 function checkIn(req, res) {
   const db = getDb();
+  ensureColumns(db); // ensure rate_type + rate_paise columns exist
   const propertyId = req.user.property_id;
 
   const {
